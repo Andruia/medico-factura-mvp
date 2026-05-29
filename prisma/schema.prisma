@@ -1,0 +1,254 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  MEDICO
+  FACTURADOR
+}
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String    @unique
+  emailVerified DateTime?
+  password      String?
+  role          Role      @default(MEDICO)
+  image         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  // Relations
+  accounts      Account[]
+  sessions      Session[]
+  medicoProfile MedicoProfile?
+  facturas      Factura[]
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+model MedicoProfile {
+  id              String    @id @default(cuid())
+  userId          String    @unique
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  nombreComercial String?
+  ruc             String    @unique
+  razonSocial     String?   // Fiscal Name
+  direccion       String?
+  direccionMatriz String?   // SRI Matrix Address
+  telefono        String?
+  logoUrl         String?
+  
+  // SRI Configuration
+  firmaElectronicaPath String? // Path to .p12 file
+  firmaPassword        String? // Encrypted password for .p12
+  ambiente             String  @default("PRUEBAS") // PRUEBAS or PRODUCCION
+  puntoEmision         String  @default("001")
+  establecimiento      String  @default("001")
+  obligadoContabilidad Boolean @default(true)
+  contribuyenteEspecial String?
+  
+  // SMTP Configuration
+  smtpServidor    String?
+  smtpPuerto      Int?
+  smtpUsuario     String?
+  smtpPassword    String?
+  smtpSsl         Boolean @default(true)
+  
+  puntosEmision        PuntoEmisionConfig[]
+  productos            ProductoServicio[]
+  
+  especialidad    String?
+
+  // Personal Info
+  numeroLicencia  String?
+
+  // Notifications
+  notificacionesPacientes Boolean @default(true)
+  notificacionesFacturas  Boolean @default(true)
+  notificacionesReportes  Boolean @default(false)
+  emailNotificaciones     Boolean @default(true)
+  smsNotificaciones       Boolean @default(false)
+
+  // Billing Defaults
+  ivaDefecto      Int    @default(12)
+  monedaDefecto   String @default("USD")
+  formatoFactura  String @default("001-001")
+
+  // QR Settings
+  tiempoExpiracionQR Int @default(24)
+  limitePacientesQR  Int @default(100)
+  
+  updatedAt       DateTime  @updatedAt
+}
+
+model PuntoEmisionConfig {
+  id              String  @id @default(cuid())
+  medicoId        String
+  establecimiento String  @default("001") // ej: "001"
+  puntoEmision    String  @default("001") // ej: "001"
+  ultimoSecuencial Int    @default(0)
+  
+  medico          MedicoProfile @relation(fields: [medicoId], references: [id], onDelete: Cascade)
+
+  @@unique([medicoId, establecimiento, puntoEmision])
+}
+
+model Paciente {
+  id              String    @id @default(cuid())
+  tipoIdentificacion String // CEDULA, RUC, PASAPORTE
+  numeroIdentificacion String @unique
+  razonSocial     String    // Nombre completo
+  email           String?
+  telefono        String?
+  direccion       String?
+  
+  facturas        Factura[]
+  atenciones      AtencionMedica[]
+  
+  activo          Boolean   @default(true)
+  
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+}
+
+model Factura {
+  id              String    @id @default(cuid())
+  secuencial      String    // 000000001
+  claveAcceso     String?   @unique // Generated 49-digit key
+  
+  fechaEmision    DateTime  @default(now())
+  
+  userId          String
+  user            User      @relation(fields: [userId], references: [id])
+  
+  pacienteId      String
+  paciente        Paciente  @relation(fields: [pacienteId], references: [id])
+  
+  subtotal        Decimal
+  iva             Decimal
+  total           Decimal
+  
+  estado          String    @default("BORRADOR") // BORRADOR, PENDIENTE_ENVIO, RECIBIDO_SRI, AUTORIZADO, RECHAZADO, DEVUELTA
+  
+  numeroAutorizacion String?
+  fechaAutorizacion  DateTime?
+  mensajeError    String?   // SRI error message
+  xmlPath         String?
+  pdfPath         String?
+  
+  items           FacturaItem[]
+  formasPago      FacturaFormaPago[]
+  infoAdicional   FacturaInfoAdicional[]
+  
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+}
+
+model FacturaItem {
+  id              String    @id @default(cuid())
+  facturaId       String
+  factura         Factura   @relation(fields: [facturaId], references: [id], onDelete: Cascade)
+  
+  codigoPrincipal String?
+  descripcion     String
+  cantidad        Decimal
+  precioUnitario  Decimal
+  descuento       Decimal   @default(0)
+  precioTotal     Decimal
+  ivaTarifa       Int       @default(12) // Propagated from product
+  impuestoValor   Decimal   @default(0)
+}
+
+model FacturaFormaPago {
+  id              String    @id @default(cuid())
+  facturaId       String
+  factura         Factura   @relation(fields: [facturaId], references: [id], onDelete: Cascade)
+  
+  codigo          String    // 01, 20, etc.
+  total           Decimal
+  plazo           Int?      // Cantidad
+  unidadTiempo    String?   // Dias, Meses, Anios
+}
+
+model FacturaInfoAdicional {
+  id              String    @id @default(cuid())
+  facturaId       String
+  factura         Factura   @relation(fields: [facturaId], references: [id], onDelete: Cascade)
+  
+  nombre          String
+  valor           String
+}
+
+model ProductoServicio {
+  id              String    @id @default(cuid())
+  medicoId        String
+  medico          MedicoProfile @relation(fields: [medicoId], references: [id], onDelete: Cascade)
+  
+  codigoPrincipal String?
+  codigoAuxiliar  String?
+  nombre          String
+  precioUnitario  Decimal
+  descripcion     String?
+  
+  ivaTarifa       Int       @default(12) // 0, 12, 15
+  
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([medicoId])
+}
+
+model AtencionMedica {
+  id          String   @id @default(cuid())
+  medicoId    String   // ID del usuario (médico) para el que espera
+  pacienteId  String
+  fecha       DateTime @default(now())
+  estado      String   @default("PENDIENTE") // PENDIENTE, COMPLETADO, ARCHIVADO
+  
+  paciente    Paciente @relation(fields: [pacienteId], references: [id], onDelete: Cascade)
+  
+  @@index([medicoId])
+  @@index([pacienteId])
+  @@index([fecha])
+}
