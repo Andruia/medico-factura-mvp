@@ -173,9 +173,13 @@ model Factura {
   
   numeroAutorizacion String?
   fechaAutorizacion  DateTime?
-  mensajeError    String?   // SRI error message
-  xmlPath         String?
+  mensajeError    String?   @db.Text // SRI error message (Text for long SRI messages)
+  xmlPath         String?   @db.Text // XML firmado o autorizado (puede ser extenso)
   pdfPath         String?
+  
+  // Tracking de reintentos (para el background processor)
+  retryCount      Int       @default(0)
+  lastRetryAt     DateTime?
   
   items           FacturaItem[]
   formasPago      FacturaFormaPago[]
@@ -183,6 +187,12 @@ model Factura {
   
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
+
+  // Índices optimizados para queries del BackgroundProcessor
+  @@index([estado, createdAt])      // Para FOR UPDATE SKIP LOCKED en sendPendingInvoices
+  @@index([estado, updatedAt])      // Para checkReceivedInvoices ORDER BY updatedAt
+  @@index([userId, estado])         // Para dashboard del médico: facturas por estado
+  @@index([userId, fechaEmision])   // Para reportes por fecha
 }
 
 model FacturaItem {
