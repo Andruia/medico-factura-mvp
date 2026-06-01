@@ -32,7 +32,7 @@ import type {
 } from "./fiscal-types"
 
 // ============================================================================
-// Structured Logger
+// Structured Logger with Correlation ID
 // ============================================================================
 
 interface LogEntry {
@@ -54,7 +54,8 @@ function log(entry: Omit<LogEntry, "timestamp" | "module">): void {
   const flags = getFiscalFeatureFlags()
   if (entry.level === "DEBUG" && !flags.verboseLogging) return
 
-  const prefix = `[${logEntry.module}][${logEntry.action}]`
+  const correlationId = getCorrelationId()
+  const prefix = `[${logEntry.module}][${logEntry.action}]${correlationId ? ` [${correlationId}]` : ''}`
   const metaStr = logEntry.meta ? ` ${JSON.stringify(logEntry.meta)}` : ""
 
   switch (entry.level) {
@@ -69,6 +70,22 @@ function log(entry: Omit<LogEntry, "timestamp" | "module">): void {
       break
     default:
       console.log(`${prefix} ${logEntry.message}${metaStr}`)
+  }
+}
+
+/**
+ * Get correlation id from async storage
+ * If not available, fallback to empty string
+ */
+function getCorrelationId(): string | undefined {
+  try {
+    // Dynamically import to avoid circular dependencies
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { CorrelationMiddleware } = require('@/shared/middleware/correlation-middleware')
+    return CorrelationMiddleware.getId()
+  } catch {
+    // If import fails or no context, return undefined
+    return undefined
   }
 }
 
@@ -260,23 +277,43 @@ export class FiscalAdapter {
         const token = await this.authenticate()
         const client = this.getClient()
 
-        log({
-          level: "INFO",
-          action: "emitir_factura",
-          message: `Intento ${attempt}/${config.maxRetries} - Emitiendo factura`,
-          meta: {
-            secuencial: payload.secuencial,
-            ruc: payload.emisor.ruc,
-            ambiente: payload.ambiente,
-          },
-        })
+     // Verbose logging of payload if enabled
+     if (flags.verboseLogging) {
+       log({
+         level: "DEBUG",
+         action: "emitir_factura",
+         message: "Payload enviado a API fiscal",
+         meta: { payload },
+       })
+     }
+     log({
+           level: "INFO",
+           action: "emitir_factura",
+           message: `Intento ${attempt}/${config.maxRetries} - Emitiendo factura`,
+           meta: {
+             secuencial: payload.secuencial,
+             ruc: payload.emisor.ruc,
+             ambiente: payload.ambiente,
+           },
+         })
 
         const response = await client.post("/sri/emitir/factura", payload, {
           headers: { Authorization: `Bearer ${token}` },
         })
 
-        const result = this.normalizeResponse(response.data, Date.now() - startTime)
-        recordCircuitBreakerSuccess()
+const result = this.normalizeResponse(response.data, Date.now() - startTime)
+        
+         // Verbose logging of response if enabled
+         if (flags.verboseLogging) {
+           log({
+             level: "DEBUG",
+             action: "emitir_factura",
+             message: "Respuesta recibida de API fiscal",
+             meta: { response: result },
+           })
+         }
+         
+         recordCircuitBreakerSuccess()
 
         log({
           level: result.success ? "INFO" : "WARN",
