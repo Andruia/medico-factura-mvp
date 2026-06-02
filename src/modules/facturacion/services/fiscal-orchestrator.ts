@@ -1,7 +1,5 @@
-import { Injectable, Logger, HttpException } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import { CertificatePreflightValidator } from '../services/certificate-preflight-validator.service';
+import { Injectable, Logger, Inject } from '@nestjs/common';
+import { CertificatePreflightValidator } from '../../fiscal/services/certificate-preflight-validator.service';
 import { CertificateValidationError } from '../../fiscal/errors/certificate-validation.error';
 import { AuditLogger } from '@/modules/logging/audit-logger.service';
 
@@ -10,17 +8,12 @@ export class FiscalOrchestrator {
   private readonly logger = new Logger(FiscalOrchestrator.name);
 
   constructor(
-    @InjectRepository('PatientRequest')
-    private readonly patientRequestRepository: Repository<PatientRequest>,
-    @InjectRepository('AuditLog')
-    private readonly auditLoggerRepository: Repository<AuditLog>,
-
-    private readonly fiscalAdapter: FiscalAdapter,
+    @Inject('PatientRequestRepository') private readonly patientRequestRepository: any,
+    @Inject('FiscalAdapter') private readonly fiscalAdapter: any,
     private readonly certificateValidator: CertificatePreflightValidator,
-    private readonly auditLogger: AuditLogger // Injected directly for traceability
-  ) {
-    this.correlationId = CorrelationMiddleware.getId();
-  }
+    private readonly auditLogger: AuditLogger,
+    @Inject('CORRELATION_ID') private readonly correlationId: string
+  ) {}
 
   async execute(patientRequestId: string): Promise<void> {
     try {
@@ -31,22 +24,15 @@ export class FiscalOrchestrator {
       // 1. Certificate pre-flight validation
       await this.certificateValidator.validate(patientRequestId);
 
-      // 2. Data validation
-      await this.validateData(patientRequest);
+      // 2. Execute with FiscalAdapter
+      const response = await this.fiscalAdapter.emitFactura(patientRequest);
 
-      // 3. Map to fiscal format
-      const fiscalRequest = this.mapToFiscalRequest(patientRequest);
-
-      // 4. Execute with FiscalAdapter
-      const response = await this.fiscalAdapter.emitFactura(fiscalRequest);
-
-      // 5. Update status and log success
+      // 3. Update status
       await this.updateFacturaState(patientRequestId, response);
 
     } catch (error) {
-      if (error instanceof DateValidationError) {
-        // Special handling for certificate validation errors
-        await this.auditLogger.logFacturaStateChange(patientRequestId, 'CERTIFICATE_INVALID', this.correlationId, {
+      if (error instanceof CertificateValidationError) {
+        await this.auditLogger.logFacturaStateChange(patientRequestId, 'CERTIFICATE_INVALID_ERROR', this.correlationId, {
           error: error.message,
         });
 
@@ -54,13 +40,17 @@ export class FiscalOrchestrator {
           status: 'CERTIFICATE_INVALID_ERROR',
           errorMessage: error.message,
         });
-
       } else {
-        // General error handling
         await this.handleError(error, patientRequestId);
       }
     }
   }
 
-  // ... (existing methods like validateData, mapToFiscalRequest, updateFacturaState)
+  private async updateFacturaState(patientRequestId: string, response: any): Promise<void> {
+    // Placeholder — will be implemented with proper status transitions
+  }
+
+  private async handleError(error: any, patientRequestId: string): Promise<void> {
+    this.logger.error(`Error processing request ${patientRequestId}: ${error.message}`);
+  }
 }

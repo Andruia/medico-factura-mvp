@@ -9,17 +9,35 @@
  *   • AuditLogger.logFacturaStateChange registra el evento con:
  *        – status  = 'CERTIFICATE_INVALID_ERROR'
  *        – correlation_id sea el mismo usado en el middleware.
- *   • El método termina sin lanzar excepción no manejada.
+ *    • El método termina sin lanzar excepción no manejada.
  */
+
+import 'reflect-metadata';
+
+// Mock validator module early so its entity imports never resolve
+jest.mock('@/modules/fiscal/services/certificate-preflight-validator.service', () => ({
+  CertificatePreflightValidator: jest.fn().mockImplementation(() => ({
+    validate: jest.fn(),
+  })),
+}));
 
 import { Test, TestingModule } from '@nestjs/testing';
 import { Repository } from 'typeorm';
 import { FiscalOrchestrator } from './fiscal-orchestrator';
 import { AuditLogger } from '@/modules/logging/audit-logger.service';
-import { FiscalAdapter } from '@/modules/sri/services/fiscal-adapter.service';
 import { CertificatePreflightValidator } from '@/modules/fiscal/services/certificate-preflight-validator.service';
 import { CertificateValidationError } from '@/modules/fiscal/errors/certificate-validation.error';
-import { PatientRequest } from '@/modules/database/entities/PatientRequest.entity';
+
+// Minimal stubs for DI tokens (real modules not present in src/)
+abstract class FiscalAdapter {
+  abstract emitFactura(request: any): Promise<any>;
+}
+
+interface PatientRequest {
+  id: string;
+  status: string;
+  user: { medicoProfile: { firmaElectronicaPath: string; firmaPassword: string } };
+}
 
 describe('FiscalOrchestrator – Certificate Pre‑Flight Resilience', () => {
     let service: FiscalOrchestrator;
@@ -47,11 +65,17 @@ describe('FiscalOrchestrator – Certificate Pre‑Flight Resilience', () => {
             validate: jest.fn().mockRejectedValue(new CertificateValidationError('Certificate expired')), // <‑‑ error simulado
         } as unknown as jest.Mocked<CertificatePreflightValidator>;
 
+        const mockPatientData: any = {
+            id: 'req-001',
+            status: 'PENDING',
+            user: { medicoProfile: { firmaElectronicaPath: '/tmp/cert.p12', firmaPassword: 'pwd' } },
+        };
+
         patientRequestRepoMock = {
-            findOneOrFail: jest.fn().mockResolvedValue({
-                id: 'req-001',
-                status: 'PENDING',
-                user: { medicoProfile: { firmaElectronicaPath: '/tmp/cert.p12', firmaPassword: 'pwd' } },
+            findOneOrFail: jest.fn().mockImplementation(() => Promise.resolve(mockPatientData)),
+            update: jest.fn().mockImplementation((id, data) => {
+                Object.assign(mockPatientData, data);
+                return Promise.resolve({ affected: 1 });
             }),
         } as unknown as jest.Mocked<Repository<PatientRequest>>;
 
@@ -63,8 +87,9 @@ describe('FiscalOrchestrator – Certificate Pre‑Flight Resilience', () => {
                 FiscalOrchestrator,
                 { provide: 'PatientRequestRepository', useValue: patientRequestRepoMock },
                 { provide: AuditLogger, useValue: auditLoggerMock },
-                { provide: FiscalAdapter, useValue: fiscalAdapterMock },
+                { provide: 'FiscalAdapter', useValue: fiscalAdapterMock },
                 { provide: CertificatePreflightValidator, useValue: validatorMock },
+                { provide: 'CORRELATION_ID', useValue: 'test-correlation-123' },
             ],
         }).compile();
 
