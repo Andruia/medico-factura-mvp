@@ -14,7 +14,7 @@
 
 import { Test, TestingModule } from '@nestjs/testing';
 import { Repository } from 'typeorm';
-import { FiscalOrchestrator } from '@/modules/facturacion/services/fiscal-orchestrator.service';
+import { FiscalOrchestrator } from './fiscal-orchestrator';
 import { AuditLogger } from '@/modules/logging/audit-logger.service';
 import { FiscalAdapter } from '@/modules/sri/services/fiscal-adapter.service';
 import { CertificatePreflightValidator } from '@/modules/fiscal/services/certificate-preflight-validator.service';

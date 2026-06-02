@@ -2,7 +2,8 @@ import { Injectable, Logger, HttpException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { CertificatePreflightValidator } from '../services/certificate-preflight-validator.service';
-import { DateValidationError } from '../errors/certificate-validation.error';
+import { CertificateValidationError } from '../../fiscal/errors/certificate-validation.error';
+import { AuditLogger } from '@/modules/logging/audit-logger.service';
 
 @Injectable()
 export class FiscalOrchestrator {
@@ -13,7 +14,7 @@ export class FiscalOrchestrator {
     private readonly patientRequestRepository: Repository<PatientRequest>,
     @InjectRepository('AuditLog')
     private readonly auditLoggerRepository: Repository<AuditLog>,
-    
+
     private readonly fiscalAdapter: FiscalAdapter,
     private readonly certificateValidator: CertificatePreflightValidator,
     private readonly auditLogger: AuditLogger // Injected directly for traceability
