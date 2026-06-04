@@ -189,6 +189,7 @@ model Factura {
   updatedAt       DateTime  @updatedAt
 
   // Índices optimizados para queries del BackgroundProcessor
+  @@unique([userId, secuencial])    // Garantizar que un médico no use el mismo secuencial legal dos veces
   @@index([estado, createdAt])      // Para FOR UPDATE SKIP LOCKED en sendPendingInvoices
   @@index([estado, updatedAt])      // Para checkReceivedInvoices ORDER BY updatedAt
   @@index([userId, estado])         // Para dashboard del médico: facturas por estado

@@ -17,20 +17,33 @@ export class FiscalOrchestrator {
 
   async execute(patientRequestId: string): Promise<void> {
     try {
+      // 1. Fetch with specific version/updatedAt (Optimistic Locking)
       const patientRequest = await this.patientRequestRepository.findOneOrFail({
-        where: { id: patientRequestId }
+        where: { 
+          id: patientRequestId,
+          status: 'PENDIENTE_ENVIO' // Only process if pending
+        }
       });
 
-      // 1. Certificate pre-flight validation
+      // 2. Transitory state change to prevent another concurrent 'execute'
+      // This is our 'lock' at the application level
+      await this.patientRequestRepository.update(patientRequestId, {
+        status: 'PROCESSING',
+        updatedAt: new Date() // Forces updatedAt change for concurrency check
+      });
+
+      // 3. Certificate pre-flight validation
       await this.certificateValidator.validate(patientRequestId);
 
-      // 2. Execute with FiscalAdapter
+      // 4. Execute with FiscalAdapter
       const response = await this.fiscalAdapter.emitFactura(patientRequest);
 
-      // 3. Update status
+      // 5. Update status
       await this.updateFacturaState(patientRequestId, response);
 
     } catch (error) {
+      this.logger.error(`Error processing request ${patientRequestId}: ${error.message}`);
+      
       if (error instanceof CertificateValidationError) {
         await this.auditLogger.logFacturaStateChange(patientRequestId, 'CERTIFICATE_INVALID_ERROR', this.correlationId, {
           error: error.message,
@@ -41,7 +54,11 @@ export class FiscalOrchestrator {
           errorMessage: error.message,
         });
       } else {
-        await this.handleError(error, patientRequestId);
+        // Rollback status if it was a transient error to allow retry
+        await this.patientRequestRepository.update(patientRequestId, {
+          status: 'PENDIENTE_ENVIO',
+          errorMessage: error.message,
+        });
       }
     }
   }

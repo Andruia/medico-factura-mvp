@@ -241,22 +241,30 @@ export class BackgroundProcessor {
   private static async checkReceivedInvoices(errors: string[]): Promise<number> {
     let count = 0
 
-    const receivedInvoices = await prisma.factura.findMany({
-      where: { estado: "RECIBIDO_SRI" },
-      orderBy: { updatedAt: "asc" },
-      take: BATCH_SIZE,
+    // Bloquear facturas RECIBIDO_SRI con FOR UPDATE SKIP LOCKED
+    const lockedIds = await prisma.$transaction(async (tx) => {
+      const pending: { id: string }[] = await tx.$queryRaw`
+        SELECT f.id 
+        FROM "Factura" f
+        WHERE f.estado = 'RECIBIDO_SRI'
+        ORDER BY f."updatedAt" ASC
+        LIMIT ${BATCH_SIZE}
+        FOR UPDATE SKIP LOCKED
+      `
+      return pending.map(p => p.id)
     })
 
-    if (receivedInvoices.length === 0) return 0
+    if (lockedIds.length === 0) return 0
 
-    console.log(`[Processor] Consultando autorización para ${receivedInvoices.length} facturas recibidas...`)
+    console.log(`[Processor] Consultando autorización para ${lockedIds.length} facturas recibidas...`)
 
     const flags = getFiscalFeatureFlags()
 
-    for (const factura of receivedInvoices) {
+    for (const facturaId of lockedIds) {
       try {
-        if (!factura.claveAcceso) {
-          throw new Error("Factura sin clave de acceso, no se puede consultar autorización.")
+        const factura = await prisma.factura.findUnique({ where: { id: facturaId } })
+        if (!factura || !factura.claveAcceso) {
+          throw new Error("Factura sin clave de acceso o no encontrada.")
         }
 
         if (flags.useFiscalAPI) {
@@ -271,8 +279,8 @@ export class BackgroundProcessor {
         }
 
       } catch (error: any) {
-        console.error(`[Processor] Error consultando factura ${factura.id}:`, error.message)
-        errors.push(`Consulta Factura ${factura.id}: ${error.message}`)
+        console.error(`[Processor] Error consultando factura ${facturaId}:`, error.message)
+        errors.push(`Consulta Factura ${facturaId}: ${error.message}`)
       }
     }
 

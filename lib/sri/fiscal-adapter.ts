@@ -51,10 +51,10 @@ function log(entry: Omit<LogEntry, "timestamp" | "module">): void {
     ...entry,
   }
 
-  const flags = getFiscalFeatureFlags()
-  if (entry.level === "DEBUG" && !flags.verboseLogging) return
+    const flags = getFiscalFeatureFlags()
+    if (entry.level === "DEBUG" && !flags.verboseLogging) return
 
-  const correlationId = getCorrelationId()
+    const correlationId = getCorrelationId()
   const prefix = `[${logEntry.module}][${logEntry.action}]${correlationId ? ` [${correlationId}]` : ''}`
   const metaStr = logEntry.meta ? ` ${JSON.stringify(logEntry.meta)}` : ""
 
@@ -276,6 +276,7 @@ export class FiscalAdapter {
       try {
         const token = await this.authenticate()
         const client = this.getClient()
+        const flags = getFiscalFeatureFlags() // Add missing flags reference
 
      // Verbose logging of payload if enabled
      if (flags.verboseLogging) {
