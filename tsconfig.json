@@ -26,9 +26,11 @@
       }
     ],
     "paths": {
-      "@/*": [
-        "src/*"
-      ]
+      "@/modules/*": ["src/modules/*"],
+      "@/shared/*": ["src/shared/*"],
+      "@/components/*": ["components/*"],
+      "@/lib/*": ["lib/*"],
+      "@/*": ["src/*", "./*"]
     }
   },
   "include": [
